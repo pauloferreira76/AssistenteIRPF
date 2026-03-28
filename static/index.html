@@ -254,11 +254,9 @@ body{font-family:var(--fn);background:var(--bg);color:var(--tx);min-height:100vh
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 // ── CONFIG ────────────────────────────────────────────────────────────────────
-// OCR server: same origin when deployed on Railway, localhost for local dev
-const OCR_SERVER = (location.hostname === '127.0.0.1' || location.hostname === 'localhost')
-  ? 'http://127.0.0.1:5050'
-  : window.location.origin;
-const CLAUDE_API = 'https://api.anthropic.com/v1/messages';
+// All API calls go to the same server (Flask proxy handles Claude + OCR)
+const API_BASE = window.location.origin;
+// Claude API is proxied through the server — see /api/chat
 
 const SYS = `Você é assistente especialista em IRPF Brasil 2025 (ano-base 2024).
 TABELA ANUAL: até R$27.110,40 (0%); até R$33.919,80 (7,5%, ded.2032,11); até R$45.012,60 (15%, ded.5200,25); até R$55.976,16 (22,5%, ded.9793,36); acima (27,5%, ded.12751,17).
@@ -392,29 +390,24 @@ async function procPdf(file) {
         ? 'Aplicando OCR nas páginas do PDF…'
         : 'Extraindo texto / aplicando OCR se necessário…';
 
+      // Call server proxy: does OCR + Claude interpretation in one shot
       const payload = { pdf_b64: b64, mode: extractMode };
-      const resp = await fetch(OCR_SERVER + '/extract', {
+      const resp = await fetch(API_BASE + '/api/extract-pdf', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify(payload)
       });
       const data = await resp.json();
       if(data.error) throw new Error(data.error);
-      extractedText = data.text;
+      // Server returns already-parsed JSON from Claude
+      pdfData = data.data;
       usedMethod = data.method;
       setStep('step-ocr','done');
     } else {
-      // Fallback: send PDF directly to Claude (native vision)
-      setStep('step-detect','done');
-      setStep('step-ocr','active');
-      stEl.textContent = 'Servidor OCR indisponível — usando visão nativa da IA…';
-      usedMethod = 'claude-vision';
-      setStep('step-ocr','done');
+      throw new Error('Servidor OCR indisponível. Verifique se o servidor está rodando.');
     }
   } catch(e) {
-    // Fallback to Claude vision
-    usedMethod = 'claude-vision';
-    setStep('step-detect','done'); setStep('step-ocr','done');
+    throw e;
   }
 
   // STEP 3: AI interpretation
@@ -495,7 +488,7 @@ async function procPdf(file) {
 
 async function checkServer() {
   try {
-    const r = await fetch(OCR_SERVER+'/health', {method:'GET',signal:AbortSignal.timeout(2000)});
+    const r = await fetch(API_BASE+'/health', {method:'GET',signal:AbortSignal.timeout(3000)});
     return r.ok;
   } catch { return false; }
 }
@@ -745,7 +738,7 @@ async function send(){
   const ty=addTyping();
   try{
     const ctx='\n\n[Seção: "'+curSec+'" | Form: '+JSON.stringify(form)+(hasPdf?'\nDados PDF: '+JSON.stringify({rt:pdfData.rendimentos_tributaveis,d:pdfData.deducoes,b:pdfData.bens_direitos,c:pdfData.calculo_ir}):'')+ ']';
-    const r=await fetch(CLAUDE_API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1500,system:SYS+ctx,messages:msgs})});
+    const r=await fetch(API_BASE+'/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1500,system:SYS+ctx,messages:msgs})});
     const d=await r.json();ty.remove();
     const reply=d.content?.[0]?.text||'Erro. Tente novamente.';
     msgs.push({role:'assistant',content:reply});addMsg('assistant',reply);
