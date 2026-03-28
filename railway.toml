@@ -6,13 +6,3 @@ dockerfilePath = "Dockerfile"
 startCommand = "python app.py"
 healthcheckPath = "/health"
 healthcheckTimeout = 60
-```
-
-Clique em **Commit changes**. O Railway detecta a mudança automaticamente e inicia um novo deploy.
-
-**Como confirmar que funcionou:**
-
-Vá em **Deployments** no Railway e abra os logs do novo deploy. A primeira linha deve mostrar:
-```
-Building with Dockerfile
-Step 1/8 : FROM python:3.11-slim
